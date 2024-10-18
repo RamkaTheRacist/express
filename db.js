@@ -35,7 +35,8 @@ SELECT * FROM catalogs;
         [title],
         (error, results) => {
             if (error) {
-                throw error
+                response.status(501).json(error);
+                return;
             }
             const catalogTree = createCatalogTree(results.rows)
             getProducts(title, catalogTree, response);
@@ -79,16 +80,24 @@ const getProducts = (catalogTitle, catalogTree, response) => {
         FROM public.products 
         WHERE category LIKE $1`,
         [catalogTitle],
-        (err, results) => {
-            if (err) {
-                throw err
+        (error, results) => {
+            if (error) {
+                response.status(501).json(error);
+                return;
             }
+            const errors = []
             for (const product of results.rows) {
-                result.push(createProductObject(product))
+                try {
+                    result.push(createProductObject(product))
+                } catch (err) {
+                    errors.push(err.stack)
+                }
+
             }
             response.status(200).json({
                 catalog: catalogTree,
-                products: result
+                products: result,
+                errors
             })
         })
 }
@@ -98,7 +107,6 @@ const createProductObject = (product) => {
         chars: []
     }
     for (const property of Object.keys(product)) {
-
         const charObject = {
             title: property,
             value: product[property]
