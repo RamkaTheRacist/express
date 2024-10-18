@@ -8,43 +8,6 @@ const pool = new Pool({
     password: '123',
     port: 5432,
 })
-
-//V1 Берем 1 категорию по title и собираем с нее готовый объект для экспорта
-const getProductsWithCatalog = (request, response) => {
-    const title = request.query.title
-    pool.query(
-        `     
-WITH RECURSIVE catalogs AS (
-  SELECT 
-    id, 
-    title, 
-    parent_id 
-  FROM 
-    public.categories 
-  WHERE 
-    title like $1
-  UNION 
-  SELECT 
-    cat.id, 
-    cat.title, 
-    cat.parent_id 
-  FROM 
-    categories cat 
-    INNER JOIN catalogs cats ON cats.parent_id = cat.id
-) 
-SELECT * FROM catalogs;     
-        `,
-        [title],
-        (error, results) => {
-            if (error) {
-                response.status(501).json(error);
-                return;
-            }
-            const catalogTree = createCatalogTree(results.rows)
-            getProducts(title, catalogTree, response);
-        })
-}
-
 const createCatalogTree = (catalogs) => {
     let result = {}
     for (let i = 0; i < catalogs.length; i++) {
@@ -60,48 +23,6 @@ const createCatalogTree = (catalogs) => {
         }
     }
     return result;
-}
-
-const getProducts = (catalogTitle, catalogTree, response) => {
-    const result = [];
-    pool.query(
-        `SELECT 
-        id,
-        brand,
-        title,
-        desc_base,
-        art_prod,
-        images_array,
-        images_resize,
-        tech_params,
-        packaging_size,
-        filters,
-        barcode,
-        quantity,
-        sellers_info
-        FROM public.products 
-        WHERE category LIKE $1`,
-        [catalogTitle],
-        (error, results) => {
-            if (error) {
-                response.status(501).json(error);
-                return;
-            }
-            const errors = []
-            for (const product of results.rows) {
-                try {
-                    result.push(createProductObject(product))
-                } catch (err) {
-                    errors.push(err.stack)
-                }
-
-            }
-            response.status(200).json({
-                catalog: catalogTree,
-                products: result,
-                errors
-            })
-        })
 }
 
 const createProductObject = (product) => {
@@ -199,8 +120,6 @@ const fillCharacteristics = (value, chars) => {
     }
 }
 
-//V1 ENDED
-
 const moveObject = {
     isReady: false,
     categoriesToPim: []
@@ -210,7 +129,7 @@ let errorsFromMove = []
 const inComplete = {
     current: 0,
     total: moveObject.categoriesToPim.length,
-    percent: current / total,
+    percent: this.current / this.total,
     errors: []
 }
 //V2 Все категории разом

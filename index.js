@@ -15,7 +15,6 @@ app.get('/', (request, response) => {
 })
 
 app.get('/move-to-pim', db.moveToPim)
-app.get('/catalogs', db.getProductsWithCatalog)
 app.get('/all-categories', db.getCategories)
 app.get('/categories-for-move', db.getCategoriesToPim)
 app.get('/errors-from-move', db.getErrorsFromMove)
