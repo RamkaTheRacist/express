@@ -19,6 +19,7 @@ app.get('/catalogs', db.getProductsWithCatalog)
 app.get('/all-categories', db.getCategories)
 app.get('/categories-for-move', db.getCategoriesToPim)
 app.get('/errors-from-move', db.getErrorsFromMove)
+app.get('/in-complete', db.getInComplete)
 app.listen(port, () => {
     console.log(`App running on port ${port}.`)
 })

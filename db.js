@@ -206,6 +206,13 @@ const moveObject = {
     categoriesToPim: []
 }
 let errorsFromMove = []
+
+const inComplete = {
+    current: 0,
+    total: moveObject.categoriesToPim.length,
+    percent: current / total,
+    errors: []
+}
 //V2 Все категории разом
 const getCategoriesToPim = (req, res) => {
     res.status(200).json(moveObject)
@@ -214,15 +221,22 @@ const getErrorsFromMove = (req, res) => {
     res.status(200).json([errorsFromMove.length, errorsFromMove])
 }
 
+const getInComplete = (req, res) => {
+    res.status(200).json(inComplete)
+}
+
 const moveToPim = async (req, res) => {
     const errors = []
     if (!moveObject.categoriesToPim.length || !moveObject.isReady) {
         res.status(400).json({ message: 'No data to move OR not ready' })
     }
     for (let i = 0; i < moveObject.categoriesToPim.length; i++) {
-        await axios.post('https://dev-api-pim-products.barneo-tech.com/barneo-import', moveObject.categoriesToPim[i]).catch((error) => {
-            errors.push(error)
-        })
+        inComplete.current = i
+        await axios.post('https://dev-api-pim-products.barneo-tech.com/barneo-import', moveObject.categoriesToPim[i])
+            .catch((error) => {
+                inComplete.errors = errors
+                errors.push(error)
+            })
         if (i == moveObject.categoriesToPim.length - 1) {
             moveObject.categoriesToPim = [];
             errorsFromMove = []
@@ -250,6 +264,7 @@ const getCategories = async (req, res) => {
             moveObject.categoriesToPim.push(objectToUse);
         }
         if (i == categories.rows.length - 1) {
+            inComplete.total = categories.rows.length;
             moveObject.isReady = true
         }
     }
@@ -333,5 +348,6 @@ module.exports = {
     getCategories,
     getCategoriesToPim,
     getErrorsFromMove,
-    moveToPim
+    moveToPim,
+    getInComplete
 }
