@@ -1,3 +1,5 @@
+const { default: axios } = require('axios')
+
 const Pool = require('pg').Pool
 const pool = new Pool({
     user: 'postgres',
@@ -199,28 +201,63 @@ const fillCharacteristics = (value, chars) => {
 
 //V1 ENDED
 
-
+const moveObject = {
+    isReady: false,
+    categoriesToPim: []
+}
+let errorsFromMove = []
 //V2 Все категории разом
-const getCategories = (req, res) => {
-    const mainResult = [];
-    pool.query(
+const getCategoriesToPim = (req, res) => {
+    res.status(200).json(moveObject)
+}
+const getErrorsFromMove = (req, res) => {
+    res.status(200).json([errorsFromMove.length, errorsFromMove])
+}
+
+const moveToPim = async (req, res) => {
+    const errors = []
+    if (!moveObject.categoriesToPim.length || !moveObject.isReady) {
+        res.status(400).json({ message: 'No data to move OR not ready' })
+    }
+    for (let i = 0; i < moveObject.categoriesToPim.length; i++) {
+        await axios.post('https://dev-api-pim-products.barneo-tech.com/barneo-import', moveObject.categoriesToPim[i]).catch((error) => {
+            errors.push(error)
+        })
+        if (i == moveObject.categoriesToPim.length - 1) {
+            moveObject.categoriesToPim = [];
+            errorsFromMove = []
+            res.json({ errors: errors })
+        }
+    }
+
+}
+
+const getCategories = async (req, res) => {
+
+    const categories = await pool.query(
         `SELECT 
         DISTINCT
         category
         FROM public.products 
-        `,
-        (err, results) => {
-            if (err) {
-                throw err
-            }
-            for (let index = 0; index < results.rows.length; index++) {
-                getProductsWithCatalogV2(results.rows[index]['category'], mainResult, index, results.rows.length - 1, res);
-            }
-        })
+        `)
+        .catch((error) => {
+            res.status(501).json(error);
+        });
+    if (!categories) { return; }
+    for (let i = 0; i < categories.rows.length; i++) {
+        const objectToUse = await getProductsWithCatalogV2(categories.rows[i]['category'], errorsFromMove)
+        if (objectToUse) {
+            moveObject.categoriesToPim.push(objectToUse);
+        }
+        if (i == categories.rows.length - 1) {
+            moveObject.isReady = true
+        }
+    }
+    res.status(200).send(true)
 }
 
-const getProductsWithCatalogV2 = (title, mainResult, curIndex, lastIndex, response) => {
-    pool.query(
+const getProductsWithCatalogV2 = async (title, errorsFromMove) => {
+    const catalogsRaw = await pool.query(
         `     
 WITH RECURSIVE catalogs AS (
   SELECT 
@@ -241,20 +278,24 @@ WITH RECURSIVE catalogs AS (
     INNER JOIN catalogs cats ON cats.parent_id = cat.id
 ) 
 SELECT * FROM catalogs;     
-        `,
-        [title],
-        (error, results) => {
-            if (error) {
-                throw error
-            }
-            const catalogTree = createCatalogTree(results.rows)
-            getProductsV2(title, catalogTree, mainResult, curIndex, lastIndex, response);
-        })
+        `, [title]).catch((error) => errorsFromMove.push(error))
+    if (!catalogsRaw) {
+        return;
+    }
+    const catalogTree = createCatalogTree(catalogsRaw.rows)
+    const products = await getProductsV2(title, errorsFromMove);
+    if (!products) {
+        return;
+    }
+    return {
+        catalog: catalogTree,
+        products
+    }
 }
 
-const getProductsV2 = (catalogTitle, catalogTree, mainResult, curIndex, lastIndex, response) => {
-    const result = [];
-    pool.query(
+const getProductsV2 = async (catalogTitle, errorsFromMove) => {
+    const products = [];
+    const productsRaw = await pool.query(
         `SELECT 
         id,
         brand,
@@ -271,26 +312,26 @@ const getProductsV2 = (catalogTitle, catalogTree, mainResult, curIndex, lastInde
         sellers_info
         FROM public.products 
         WHERE category LIKE $1`,
-        [catalogTitle],
-        (err, results) => {
-            if (err) {
-                throw err
-            }
-            for (const product of results.rows) {
-                result.push(createProductObject(product))
-            }
-            mainResult.push({
-                catalog: catalogTree,
-                products: result
-            })
-            if (curIndex == lastIndex) {
-                response.status(200).json(mainResult)
-            }
-        })
+        [catalogTitle]).catch((error) => errorsFromMove.push(error))
+    if (!productsRaw) {
+        return;
+    }
+    for (const product of productsRaw.rows) {
+        try {
+            products.push(createProductObject(product))
+        } catch (error) {
+            (error) => errorsFromMove.push(error.stack)
+        }
+    }
+    return products;
 }
+
 
 
 module.exports = {
     getProductsWithCatalog,
-    getCategories
+    getCategories,
+    getCategoriesToPim,
+    getErrorsFromMove,
+    moveToPim
 }

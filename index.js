@@ -14,14 +14,11 @@ app.get('/', (request, response) => {
     response.json({ info: 'Node.js, Express, and Postgres API' })
 })
 
+app.get('/move-to-pim', db.moveToPim)
 app.get('/catalogs', db.getProductsWithCatalog)
 app.get('/all-categories', db.getCategories)
+app.get('/categories-for-move', db.getCategoriesToPim)
+app.get('/errors-from-move', db.getErrorsFromMove)
 app.listen(port, () => {
     console.log(`App running on port ${port}.`)
 })
-
-//V1 Берем 1 категорию по title и собираем с нее готовый объект для экспорта
-//ROUTE => "/catalogs" QUERY => ?title=***
-
-//V2 Все категории разом обрабатываются и возвращается массив объектов
-//ROUTE => "/all-categories"
