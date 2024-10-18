@@ -1,6 +1,3 @@
-const { catQuery, cat } = require('./cat')
-const { prodQuery, prod } = require('./prod')
-
 const Pool = require('pg').Pool
 const pool = new Pool({
     user: 'postgres',
