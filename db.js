@@ -168,10 +168,12 @@ const moveToPim = async (req, res) => {
 const getCategories = async (req, res) => {
 
     const categories = await pool.query(
-        `SELECT 
+        `
+        SELECT 
         DISTINCT
         category
         FROM public.products 
+        WHERE category IS NOT NULL
         `)
         .catch((error) => {
             res.status(501).json(error);
