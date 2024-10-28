@@ -15,9 +15,15 @@ const createCatalogTree = (catalogs) => {
             result = {
                 title: catalogs[i].title
             };
-        } else {
+            continue;
+        }
+        result = {
+            title: catalogs[i].title,
+            children: result
+        }
+        if (i === catalogs.length - 1) {
             result = {
-                title: catalogs[i].title,
+                title: catalogs[i].kind.slice(0, 1).toUpperCase() + catalogs[i].kind.slice(1).toLowerCase(),
                 children: result
             }
         }
@@ -132,7 +138,7 @@ const inComplete = {
     percent: this.current / this.total,
     errors: []
 }
-//V2 Все категории разом
+
 const getCategoriesToPim = (req, res) => {
     res.status(200).json(moveObject)
 }
@@ -151,12 +157,14 @@ const moveToPim = async (req, res) => {
     }
     for (let i = 0; i < moveObject.categoriesToPim.length; i++) {
         inComplete.current = i
+        inComplete.percent = inComplete.current / inComplete.total
         await axios.post('https://dev-api-pim-products.barneo-tech.com/barneo-import', moveObject.categoriesToPim[i])
             .catch((error) => {
                 inComplete.errors = errors
                 errors.push(error)
             })
         if (i == moveObject.categoriesToPim.length - 1) {
+
             moveObject.categoriesToPim = [];
             errorsFromMove = []
             res.json({ errors: errors })
@@ -180,46 +188,37 @@ const getCategories = async (req, res) => {
         });
     if (!categories) { return; }
     for (let i = 0; i < categories.rows.length; i++) {
-        const objectToUse = await getProductsWithCatalogV2(categories.rows[i]['category'], errorsFromMove)
+        const objectToUse = await getProductsWithCatalog(categories.rows[i]['category'], errorsFromMove)
         if (objectToUse) {
             moveObject.categoriesToPim.push(objectToUse);
         }
         if (i == categories.rows.length - 1) {
             inComplete.total = categories.rows.length;
+            inComplete.percent = inComplete.current / inComplete.total;
             moveObject.isReady = true
         }
     }
     res.status(200).send(true)
 }
 
-const getProductsWithCatalogV2 = async (title, errorsFromMove) => {
+
+const getProductsWithCatalog = async (title, errorsFromMove) => {
     const catalogsRaw = await pool.query(
-        `     
-WITH RECURSIVE catalogs AS (
-  SELECT 
-    id, 
-    title, 
-    parent_id 
-  FROM 
-    public.categories 
-  WHERE 
-    title like $1
-  UNION 
-  SELECT 
-    cat.id, 
-    cat.title, 
-    cat.parent_id 
-  FROM 
-    categories cat 
-    INNER JOIN catalogs cats ON cats.parent_id = cat.id
-) 
-SELECT * FROM catalogs;     
+        `    
+        SELECT id, title, parent_id, kind FROM public.categories as cat
+        WHERE cat.title like $1 
+        UNION ALL
+        SELECT id, title, parent_id, kind FROM public.categories as par
+        WHERE par.id = (
+        SELECT parent_id FROM public.categories as cat
+        WHERE cat.title like $1 AND (cat.parent_id <> 0 AND cat.parent_id IS NOT NULL)
+        ) 
         `, [title]).catch((error) => errorsFromMove.push(error))
     if (!catalogsRaw) {
         return;
     }
     const catalogTree = createCatalogTree(catalogsRaw.rows)
-    const products = await getProductsV2(title, errorsFromMove);
+    const products = await getProducts(title, errorsFromMove);
     if (!products) {
         return;
     }
@@ -229,7 +228,7 @@ SELECT * FROM catalogs;
     }
 }
 
-const getProductsV2 = async (catalogTitle, errorsFromMove) => {
+const getProducts = async (catalogTitle, errorsFromMove) => {
     const products = [];
     const productsRaw = await pool.query(
         `SELECT 
@@ -265,10 +264,9 @@ const getProductsV2 = async (catalogTitle, errorsFromMove) => {
 
 
 module.exports = {
-    getProductsWithCatalog,
     getCategories,
     getCategoriesToPim,
     getErrorsFromMove,
     moveToPim,
-    getInComplete
+    getInComplete,
 }

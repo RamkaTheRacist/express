@@ -13,7 +13,6 @@ app.use(
 app.get('/', (request, response) => {
     response.json({ info: 'Node.js, Express, and Postgres API' })
 })
-
 app.get('/move-to-pim', db.moveToPim)
 app.get('/all-categories', db.getCategories)
 app.get('/categories-for-move', db.getCategoriesToPim)
