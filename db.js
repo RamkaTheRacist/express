@@ -28,6 +28,10 @@ const createCatalogTree = (catalogs) => {
             }
         }
     }
+    result = {
+        title: 'Barneo catalog',
+        children: result
+    }
     return result;
 }
 
