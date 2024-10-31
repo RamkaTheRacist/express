@@ -1,40 +1,167 @@
 const { default: axios } = require('axios')
 
-const Pool = require('pg').Pool
-const pool = new Pool({
-    user: 'postgres',
-    host: 'localhost',
-    database: 'postgres',
-    password: '123',
-    port: 5432,
-})
-const createCatalogTree = (catalogs) => {
-    let result = {}
-    for (let i = 0; i < catalogs.length; i++) {
-        if (i === 0) {
-            result = {
-                title: catalogs[i].title
-            };
-            continue;
-        }
-        result = {
-            title: catalogs[i].title,
-            children: result
-        }
-        if (i === catalogs.length - 1) {
-            result = {
-                title: catalogs[i].kind.slice(0, 1).toUpperCase() + catalogs[i].kind.slice(1).toLowerCase(),
-                children: result
-            }
-        }
-    }
-    result = {
-        title: 'Barneo catalog',
-        children: result
-    }
-    return result;
+// NEW ADDED
+let allCategories = [];
+const errors = {
+    catalogTree: [],
+    productsRaw: [],
+    products: []
 }
 
+const moveObject = {
+    isReady: false,
+    categoriesToPim: []
+}
+
+const inComplete = {
+    current: 0,
+    total: 0,
+    percent: 0,
+    uncompleted: [],
+    errors: []
+}
+
+const pg = require('pg');
+const connectConf = ''
+const client = new pg.Client(connectConf);
+client.connect();
+//FILL local allCategoryTitles
+const fillAllCategoryTitles = async (req, res) => {
+    const categories = await client.query(
+        `
+        SELECT 
+        DISTINCT
+        title,
+        id      
+        FROM public.categories
+        `)
+        .catch((error) => {
+            res.status(501).json(error);
+        });
+    if (!categories) { return; }
+    allCategories = categories.rows;
+    res.json({
+        status: 'done',
+        length: allCategories.length
+    })
+}
+//RETURN local allCategoryTitles
+const getAllCategoryTitles = (req, res) => {
+    res.json({
+        length: allCategories.length,
+        categories: allCategories
+    })
+}
+//PUSH LOCAL CATEGORY FOR PIM WITH PRODUCTS
+const createOneCategoryWithProduct = async (req, res) => {
+    if (!allCategories.length) {
+        return res.json({ error: 'Нет названий категорий' })
+    }
+    if (moveObject.categoriesToPim.length == 5 && req.query.testing === undefined) {
+        return res.json({
+            error: 'Уже 5 категорий с товаром есть',
+            moveObject: moveObject.categoriesToPim.map((el) => { return { catalog: el.catalog, productLength: el.products.length } })
+        })
+    }
+    const category = allCategories.pop();
+    const categoryTree = await getCategoryTree(category['title']);
+    const products = await getProducts(category);
+    if (!products.length) {
+        res.json({
+            date: new Date(),
+            error: 'В категории нет товаров или не удалось получить',
+            category
+        })
+        return;
+    }
+    moveObject.categoriesToPim.push({
+        catalog: categoryTree,
+        products
+    })
+    moveObject.isReady = true;
+    res.json({
+        isReady: moveObject.isReady,
+        leftCategories: allCategories.length,
+        categoryTree,
+        productLength: products.length
+    })
+}
+
+//GET CATEGORY TREE
+const getCategoryTree = async (title) => {
+    try {
+        const catalogsRaw = await client.query(
+            `    
+            SELECT id, title, parent_id, kind FROM public.categories as cat
+            WHERE cat.title like $1 
+            UNION ALL
+            SELECT id, title, parent_id, kind FROM public.categories as par
+            WHERE par.id = (
+            SELECT parent_id FROM public.categories as cat
+            WHERE cat.title like $1 AND (cat.parent_id <> 0 AND cat.parent_id IS NOT NULL)
+            ) 
+            `, [title]);
+        if (!catalogsRaw) {
+            return;
+        }
+        return createCatalogTree(catalogsRaw.rows)
+    } catch (error) {
+        errors.catalogTree.push({
+            date: new Date(),
+            title,
+            error: error
+        })
+    }
+}
+
+//GET PRODUCT OBJECTS ARRAY
+const getProducts = async (category) => {
+    const products = [];
+    try {
+        const productsRaw = await client.query(
+            `SELECT 
+        id,
+        brand,
+        title,
+        desc_base,
+        art_prod,
+        images_array,
+        images_resize,
+        tech_params,
+        packaging_size,
+        filters,
+        barcode,
+        quantity,
+        sellers_info
+        FROM public.products 
+        WHERE ((category_id IS NULL OR category_id = 0)AND category LIKE $1) OR (category_id = $2)`,
+            [category.title, category.id])
+        if (!productsRaw) {
+            return;
+        }
+        for (const product of productsRaw.rows) {
+            try {
+                products.push(createProductObject(product))
+            } catch (error) {
+                errors.products.push({
+                    date: new Date(),
+                    id: product.id,
+                    catalog: category,
+                    error: error
+                })
+            }
+        }
+    } catch (error) {
+        errors.productsRaw.push({
+            date: new Date(),
+            catalog: category,
+            error: error
+        })
+    }
+    return products;
+}
+
+//GET PRODUCT OBJECT
 const createProductObject = (product) => {
     const newProduct = {
         chars: []
@@ -90,10 +217,15 @@ const createProductObject = (product) => {
     return newProduct;
 }
 
+//FOR IMAGE
 const getImageArray = (array) => {
+    if (!array) {
+        return null
+    }
     return array.map((el) => el = 'https://www.barneo.ru' + el.replace(/\s/g, ''));
 }
 
+//FOR CHARS
 const fillCharacteristics = (value, chars) => {
     for (const key of Object.keys(value)) {
         if (key === 'категория' || key === 'бренд') { continue; }
@@ -129,148 +261,113 @@ const fillCharacteristics = (value, chars) => {
         }
     }
 }
-
-const moveObject = {
-    isReady: false,
-    categoriesToPim: []
-}
-let errorsFromMove = []
-
-const inComplete = {
-    current: 0,
-    total: moveObject.categoriesToPim.length,
-    percent: this.current / this.total,
-    errors: []
-}
-
+//CATEGORIES TO PIM
 const getCategoriesToPim = (req, res) => {
     res.status(200).json(moveObject)
 }
-const getErrorsFromMove = (req, res) => {
-    res.status(200).json([errorsFromMove.length, errorsFromMove])
+//ERRORS
+const getErrors = (req, res) => {
+    res.status(200).json(errors)
 }
-
+// CREATE CATAGORY TREE
+const createCatalogTree = (catalogs) => {
+    let result = {}
+    for (let i = 0; i < catalogs.length; i++) {
+        if (i === 0) {
+            result = {
+                title: catalogs[i].title
+            };
+            continue;
+        }
+        result = {
+            title: catalogs[i].title,
+            children: result
+        }
+        if (i === catalogs.length - 1) {
+            if (catalogs[i].kind) {
+                result = {
+                    title: catalogs[i].kind.slice(0, 1).toUpperCase() + catalogs[i].kind.slice(1).toLowerCase(),
+                    children: result
+                }
+            }
+        }
+    }
+    result = {
+        title: 'Barneo catalog',
+        children: result
+    }
+    return result;
+}
+//IN COMPLETE
 const getInComplete = (req, res) => {
     res.status(200).json(inComplete)
 }
-
+// SEND REQ TO PIM
 const moveToPim = async (req, res) => {
-    const errors = []
     if (!moveObject.categoriesToPim.length || !moveObject.isReady) {
-        res.status(400).json({ message: 'No data to move OR not ready' })
+        res.status(400).json({ error: 'Нет категорий или не готово' })
     }
+    inComplete.total = moveObject.categoriesToPim.length;
     for (let i = 0; i < moveObject.categoriesToPim.length; i++) {
-        inComplete.current = i
+        inComplete.current = i + 1
         inComplete.percent = inComplete.current / inComplete.total
         await axios.post('https://dev-api-pim-products.barneo-tech.com/barneo-import', moveObject.categoriesToPim[i])
             .catch((error) => {
-                inComplete.errors = errors
-                errors.push(error)
+                inComplete.errors.push({
+                    date: new Date(),
+                    index: i,
+                    error: error.stack
+                })
             })
         if (i == moveObject.categoriesToPim.length - 1) {
+            if (!inComplete.errors.length) {
+                inComplete.uncompleted = [];
+            }
+            if (inComplete.errors.length) {
+                inComplete.uncompleted = inComplete.errors.map((el) => el.index)
+            }
+            const categoriesLeft = [];
 
-            moveObject.categoriesToPim = [];
-            errorsFromMove = []
-            res.json({ errors: errors })
+            for (let index = 0; index < inComplete.uncompleted.length; index++) {
+                categoriesLeft.push(moveObject.categoriesToPim[inComplete.uncompleted[index]])
+            }
+            moveObject.categoriesToPim = categoriesLeft;
+            res.json({
+                rejectedIndex: inComplete.uncompleted
+            })
         }
-    }
-
-}
-
-const getCategories = async (req, res) => {
-
-    const categories = await pool.query(
-        `
-        SELECT 
-        DISTINCT
-        category
-        FROM public.products 
-        WHERE category IS NOT NULL
-        `)
-        .catch((error) => {
-            res.status(501).json(error);
-        });
-    if (!categories) { return; }
-    for (let i = 0; i < categories.rows.length; i++) {
-        const objectToUse = await getProductsWithCatalog(categories.rows[i]['category'], errorsFromMove)
-        if (objectToUse) {
-            moveObject.categoriesToPim.push(objectToUse);
-        }
-        if (i == categories.rows.length - 1) {
-            inComplete.total = categories.rows.length;
-            inComplete.percent = inComplete.current / inComplete.total;
-            moveObject.isReady = true
-        }
-    }
-    res.status(200).send(true)
-}
-
-
-const getProductsWithCatalog = async (title, errorsFromMove) => {
-    const catalogsRaw = await pool.query(
-        `    
-        SELECT id, title, parent_id, kind FROM public.categories as cat
-        WHERE cat.title like $1 
-        UNION ALL
-        SELECT id, title, parent_id, kind FROM public.categories as par
-        WHERE par.id = (
-        SELECT parent_id FROM public.categories as cat
-        WHERE cat.title like $1 AND (cat.parent_id <> 0 AND cat.parent_id IS NOT NULL)
-        ) 
-        `, [title]).catch((error) => errorsFromMove.push(error))
-    if (!catalogsRaw) {
-        return;
-    }
-    const catalogTree = createCatalogTree(catalogsRaw.rows)
-    const products = await getProducts(title, errorsFromMove);
-    if (!products) {
-        return;
-    }
-    return {
-        catalog: catalogTree,
-        products
     }
 }
 
-const getProducts = async (catalogTitle, errorsFromMove) => {
-    const products = [];
-    const productsRaw = await pool.query(
-        `SELECT 
-        id,
-        brand,
-        title,
-        desc_base,
-        art_prod,
-        images_array,
-        images_resize,
-        tech_params,
-        packaging_size,
-        filters,
-        barcode,
-        quantity,
-        sellers_info
-        FROM public.products 
-        WHERE category LIKE $1`,
-        [catalogTitle]).catch((error) => errorsFromMove.push(error))
-    if (!productsRaw) {
-        return;
+const resetObjects = (req, res) => {
+    if (req.query.errors == 'true') {
+        errors.catalogTree = [];
+        errors.productsRaw = [];
+        errors.products = []
     }
-    for (const product of productsRaw.rows) {
-        try {
-            products.push(createProductObject(product))
-        } catch (error) {
-            (error) => errorsFromMove.push(error.stack)
-        }
+
+    if (req.query.moveobject == 'true') {
+        moveObject.isReady = false;
+        moveObject.categoriesToPim = []
     }
-    return products;
+
+    if (req.query.uncompleted == 'true') {
+        inComplete.uncompleted = [];
+    }
+
+    if (req.query.incompleteerrors == 'true') {
+        inComplete.errors = [];
+    }
+    res.json(true)
 }
-
-
 
 module.exports = {
-    getCategories,
     getCategoriesToPim,
-    getErrorsFromMove,
+    getErrors,
     moveToPim,
     getInComplete,
+    fillAllCategoryTitles,
+    getAllCategoryTitles,
+    createOneCategoryWithProduct,
+    resetObjects
 }

@@ -10,14 +10,15 @@ app.use(
         extended: true,
     })
 )
-app.get('/', (request, response) => {
-    response.json({ info: 'Node.js, Express, and Postgres API' })
-})
+
 app.get('/move-to-pim', db.moveToPim)
-app.get('/all-categories', db.getCategories)
 app.get('/categories-for-move', db.getCategoriesToPim)
-app.get('/errors-from-move', db.getErrorsFromMove)
+app.get('/errors', db.getErrors)
 app.get('/in-complete', db.getInComplete)
+app.get('/fill-cat-titles', db.fillAllCategoryTitles)
+app.get('/get-cat-titles', db.getAllCategoryTitles)
+app.get('/create-one', db.createOneCategoryWithProduct)
+app.get('/reset-objects', db.resetObjects)
 app.listen(port, () => {
     console.log(`App running on port ${port}.`)
 })
